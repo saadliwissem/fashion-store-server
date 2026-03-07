@@ -2,7 +2,7 @@ const Waitlist = require("../models/Waitlist");
 const Chronicle = require("../models/Chronicle");
 const KeeperProfile = require("../models/KeeperProfile");
 const asyncHandler = require("../middleware/async");
-const ErrorResponse = require("../utils/errorResponse");
+const ErrorResponse = require("../utils/ErrorResponse");
 
 // @desc    Join waitlist
 // @route   POST /api/waitlist
