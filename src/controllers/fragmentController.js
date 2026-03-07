@@ -2,7 +2,7 @@ const Fragment = require("../models/Fragment");
 const Chronicle = require("../models/Chronicle");
 const Claim = require("../models/Claim");
 const asyncHandler = require("../middleware/async");
-const ErrorResponse = require("../utils/errorResponse");
+const ErrorResponse = require("../utils/ErrorResponse");
 
 // @desc    Get all fragments
 // @route   GET /api/fragments

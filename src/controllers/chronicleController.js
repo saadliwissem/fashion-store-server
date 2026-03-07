@@ -2,7 +2,7 @@ const Chronicle = require("../models/Chronicle");
 const Fragment = require("../models/Fragment");
 const Waitlist = require("../models/Waitlist");
 const asyncHandler = require("../middleware/async");
-const ErrorResponse = require("../utils/errorResponse");
+const ErrorResponse = require("../utils/ErrorResponse");
 
 // @desc    Get all chronicles
 // @route   GET /api/chronicles

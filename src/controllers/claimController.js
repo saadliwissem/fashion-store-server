@@ -2,7 +2,7 @@ const Claim = require("../models/Claim");
 const Fragment = require("../models/Fragment");
 const KeeperProfile = require("../models/KeeperProfile");
 const asyncHandler = require("../middleware/async");
-const ErrorResponse = require("../utils/errorResponse");
+const ErrorResponse = require("../utils/ErrorResponse");
 
 // @desc    Create new claim
 // @route   POST /api/claims
