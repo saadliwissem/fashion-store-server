@@ -4,7 +4,7 @@ const Fragment = require("../models/Fragment");
 const Claim = require("../models/Claim");
 const Waitlist = require("../models/Waitlist");
 const asyncHandler = require("../middleware/async");
-const ErrorResponse = require("../utils/errorResponse");
+const ErrorResponse = require("../utils/ErrorResponse");
 
 // @desc    Get chronicle predictions/stats for Oracle
 // @route   GET /api/analytics/chronicle/:id
