@@ -27,7 +27,7 @@ const adminProductRoutes = require("./src/routes/adminProductRoutes");
 const adminInventoryRoutes = require("./src/routes/adminInventoryRoutes");
 const adminOrderRoutes = require("./src/routes/adminOrderRoutes");
 
-// Import new enigma platform routes
+// Import new enigma platform routes (public)
 const enigmaRoutes = require("./src/routes/enigmaRoutes");
 const chronicleRoutes = require("./src/routes/chronicleRoutes");
 const fragmentRoutes = require("./src/routes/fragmentRoutes");
@@ -35,6 +35,14 @@ const claimRoutes = require("./src/routes/claimRoutes");
 const waitlistRoutes = require("./src/routes/waitlistRoutes");
 const analyticsRoutes = require("./src/routes/analyticsRoutes");
 const keeperRoutes = require("./src/routes/keeperRoutes");
+
+// Import admin enigma platform routes
+const adminEnigmaRoutes = require("./src/routes/adminEnigmaRoutes");
+const adminChronicleRoutes = require("./src/routes/adminChronicleRoutes");
+const adminFragmentRoutes = require("./src/routes/adminFragmentRoutes");
+const adminClaimRoutes = require("./src/routes/adminClaimRoutes");
+const adminWaitlistRoutes = require("./src/routes/adminWaitlistRoutes");
+const adminDashboardRoutes = require("./src/routes/adminDashboardRoutes");
 
 // Import middleware
 const { errorHandler, notFound } = require("./src/middleware/errorMiddleware");
@@ -74,7 +82,9 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 // Apply rate limiting to all API routes
 app.use("/api/", apiLimiter);
 
-// API Routes - E-commerce
+// ==================== PUBLIC API ROUTES ====================
+
+// E-commerce Public Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/categories", categoryRoutes);
@@ -82,13 +92,8 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/reviews", reviewRoutes);
-// app.use("/api/admin", adminRoutes);
-app.use("/api/admin/categories", adminCategoryRoutes);
-app.use("/api/admin/products", adminProductRoutes);
-app.use("/api/admin/inventory", adminInventoryRoutes);
-app.use("/api/admin/orders", adminOrderRoutes);
 
-// API Routes - Enigma Platform
+// Enigma Platform Public Routes
 app.use("/api/enigmas", enigmaRoutes);
 app.use("/api/chronicles", chronicleRoutes);
 app.use("/api/fragments", fragmentRoutes);
@@ -96,6 +101,23 @@ app.use("/api/claims", claimRoutes);
 app.use("/api/waitlist", waitlistRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/keepers", keeperRoutes);
+
+// ==================== ADMIN API ROUTES ====================
+
+// E-commerce Admin Routes
+app.use("/api/admin", adminRoutes);
+app.use("/api/admin/categories", adminCategoryRoutes);
+app.use("/api/admin/products", adminProductRoutes);
+app.use("/api/admin/inventory", adminInventoryRoutes);
+app.use("/api/admin/orders", adminOrderRoutes);
+
+// Enigma Platform Admin Routes
+app.use("/api/admin/enigmas", adminEnigmaRoutes);
+app.use("/api/admin/chronicles", adminChronicleRoutes);
+app.use("/api/admin/fragments", adminFragmentRoutes);
+app.use("/api/admin/claims", adminClaimRoutes);
+app.use("/api/admin/waitlist", adminWaitlistRoutes);
+app.use("/api/admin/dashboard", adminDashboardRoutes);
 
 // Health check route
 app.get("/api/health", (req, res) => {
@@ -159,6 +181,7 @@ server.listen(PORT, () => {
   console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL}`);
   console.log(`📦 E-commerce API loaded`);
   console.log(`🔍 Enigma Platform API loaded`);
+  console.log(`📊 Enigma Platform Admin API loaded`);
   console.log(`🔌 WebSocket server initialized`);
 });
 
