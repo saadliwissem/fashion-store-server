@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Enigma = require("../models/Enigma");
 const Chronicle = require("../models/Chronicle");
 const asyncHandler = require("../middleware/async");
