@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const Enigma = require("../models/Enigma");
 const Chronicle = require("../models/Chronicle");
 const asyncHandler = require("../middleware/async");
-const ErrorResponse = require("../utils/errorResponse");
+const ErrorResponse = require("../utils/ErrorResponse");
 
 // @desc    Get all enigmas with filtering and pagination
 // @route   GET /api/admin/enigmas

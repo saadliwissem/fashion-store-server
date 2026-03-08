@@ -3,7 +3,7 @@ const Fragment = require("../models/Fragment");
 const User = require("../models/User");
 const mongoose = require("mongoose");
 const asyncHandler = require("../middleware/async");
-const ErrorResponse = require("../utils/errorResponse");
+const ErrorResponse = require("../utils/ErrorResponse");
 
 // @desc    Get all claims with filtering and pagination
 // @route   GET /api/admin/claims
