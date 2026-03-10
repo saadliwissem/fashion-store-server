@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Product = require("./Product");
+const { updateMultipleCategoryStats } = require("../utils/categoryUtils");
 
 const inventoryMovementSchema = new mongoose.Schema({
   type: {
@@ -153,7 +154,88 @@ inventorySchema.post("findOneAndUpdate", async function (doc) {
     }
   }
 });
+// After saving a new inventory record
+inventorySchema.post("save", async function (doc) {
+  try {
+    // Get the product to find its category
+    const product = await Product.findById(doc.product).select("category");
+    if (product && product.category) {
+      await updateMultipleCategoryStats([product.category]);
+    }
+  } catch (error) {
+    console.error("Error updating category after inventory save:", error);
+  }
+});
 
+// After updating an inventory record
+inventorySchema.post("findOneAndUpdate", async function (doc) {
+  try {
+    if (doc) {
+      const product = await Product.findById(doc.product).select("category");
+      if (product && product.category) {
+        await updateMultipleCategoryStats([product.category]);
+      }
+    }
+  } catch (error) {
+    console.error("Error updating category after inventory update:", error);
+  }
+});
+
+// After updating multiple inventory records
+inventorySchema.post("updateMany", async function (doc) {
+  try {
+    // This is trickier - you'd need to get all affected products
+    const filter = this._conditions;
+    const affectedInventories = await this.model.find(filter).select("product");
+
+    const productIds = [
+      ...new Set(affectedInventories.map((i) => i.product.toString())),
+    ];
+    const products = await Product.find({ _id: { $in: productIds } }).select(
+      "category"
+    );
+
+    const categoryIds = [
+      ...new Set(products.map((p) => p.category?.toString()).filter(Boolean)),
+    ];
+
+    if (categoryIds.length > 0) {
+      await updateMultipleCategoryStats(categoryIds);
+    }
+  } catch (error) {
+    console.error(
+      "Error updating categories after inventory updateMany:",
+      error
+    );
+  }
+});
+
+// After deleting inventory records
+inventorySchema.post("deleteMany", async function (doc) {
+  try {
+    // Similar to updateMany, get affected products from the filter
+    const filter = this._conditions;
+    // You might need to store the affected products before deletion
+    // This is a simplified version
+    console.log("Inventory deleted - consider updating categories");
+  } catch (error) {
+    console.error("Error updating categories after inventory delete:", error);
+  }
+});
+
+// After deleting a single inventory record
+inventorySchema.post("findOneAndDelete", async function (doc) {
+  try {
+    if (doc) {
+      const product = await Product.findById(doc.product).select("category");
+      if (product && product.category) {
+        await updateMultipleCategoryStats([product.category]);
+      }
+    }
+  } catch (error) {
+    console.error("Error updating category after inventory delete:", error);
+  }
+});
 // Indexes
 inventorySchema.index({ product: 1 });
 inventorySchema.index({ status: 1 });

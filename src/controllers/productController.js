@@ -11,94 +11,61 @@ const getProducts = asyncHandler(async (req, res) => {
   const pageSize = 12;
   const page = Number(req.query.page) || 1;
 
-  // Build query
   let query = {};
   let sort = { createdAt: -1 };
 
   // Category filter
   if (req.query.category) {
-    const category = await Category.findOne({ slug: req.query.category });
-    if (category) {
-      query.category = category._id;
-    }
+    const category = await Category.findOne({
+      slug: req.query.category,
+    }).lean();
+    if (category) query.category = category._id;
   }
 
-  // Search filter
   if (req.query.search) {
     query.$text = { $search: req.query.search };
   }
 
-  // Price filter
   if (req.query.minPrice || req.query.maxPrice) {
     query.price = {};
-    if (req.query.minPrice) {
-      query.price.$gte = Number(req.query.minPrice);
-    }
-    if (req.query.maxPrice) {
-      query.price.$lte = Number(req.query.maxPrice);
-    }
+    if (req.query.minPrice) query.price.$gte = Number(req.query.minPrice);
+    if (req.query.maxPrice) query.price.$lte = Number(req.query.maxPrice);
   }
 
-  // Status filter (default to active)
-  if (!req.query.status) {
-    query.status = "active";
-  } else if (req.query.status !== "all") {
-    query.status = req.query.status;
-  }
+  if (!req.query.status) query.status = "active";
+  else if (req.query.status !== "all") query.status = req.query.status;
 
-  // Featured filter
-  if (req.query.featured) {
-    query.featured = req.query.featured === "true";
-  }
+  if (req.query.featured) query.featured = req.query.featured === "true";
+  if (req.query.onSale) query.onSale = req.query.onSale === "true";
+  if (req.query.new) query.isNewArrival = true;
 
-  // On sale filter
-  if (req.query.onSale) {
-    query.onSale = req.query.onSale === "true";
-  }
-
-  // New arrivals filter
-  if (req.query.new) {
-    query.isNewArrival = true;
-  }
-
-  // Sort options
   if (req.query.sort) {
-    switch (req.query.sort) {
-      case "price-asc":
-        sort = { price: 1 };
-        break;
-      case "price-desc":
-        sort = { price: -1 };
-        break;
-      case "name-asc":
-        sort = { name: 1 };
-        break;
-      case "name-desc":
-        sort = { name: -1 };
-        break;
-      case "rating":
-        sort = { averageRating: -1 };
-        break;
-      case "popular":
-        sort = { purchaseCount: -1 };
-        break;
-      default:
-        sort = { createdAt: -1 };
-    }
+    const sortMap = {
+      "price-asc": { price: 1 },
+      "price-desc": { price: -1 },
+      "name-asc": { name: 1 },
+      "name-desc": { name: -1 },
+      rating: { averageRating: -1 },
+      popular: { purchaseCount: -1 },
+    };
+
+    sort = sortMap[req.query.sort] || { createdAt: -1 };
   }
 
-  // Execute query with pagination
-  const count = await Product.countDocuments(query);
-  const products = await Product.find(query)
-    .populate("category", "name slug")
-    .sort(sort)
-    .limit(pageSize)
-    .skip(pageSize * (page - 1))
-    .lean();
+  const skip = pageSize * (page - 1);
 
-  // Calculate pagination
+  // Run queries in parallel
+  const [count, products] = await Promise.all([
+    Product.countDocuments(query),
+    Product.find(query)
+      .sort(sort)
+      .limit(pageSize)
+      .skip(skip)
+      .select("-__v")
+      .lean(),
+  ]);
+
   const pages = Math.ceil(count / pageSize);
-
   res.json({
     success: true,
     products,

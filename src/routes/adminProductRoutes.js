@@ -3,12 +3,18 @@ const router = express.Router();
 const productController = require("../controllers/adminProductController");
 const { validateProduct } = require("../middleware/productValidation");
 const { uploadMultiple } = require("../middleware/uploadMiddleware");
+const upload = require("../middleware/upload");
 
 // Admin routes
 router.get("/", productController.getProducts);
 router.get("/stats", productController.getProductStats);
 router.get("/:id", productController.getProduct);
-router.post("/", validateProduct, productController.createProduct);
+router.post(
+  "/",
+  validateProduct,
+  upload.array("images", 10),
+  productController.createProduct
+);
 router.put("/:id", validateProduct, productController.updateProduct);
 router.delete("/:id", productController.deleteProduct);
 router.put("/bulk", productController.bulkUpdateProducts);

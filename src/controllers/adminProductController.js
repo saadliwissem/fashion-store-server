@@ -1,8 +1,39 @@
+const cloudinary = require("../config/cloudinary");
 const Product = require("../models/Product");
 const Category = require("../models/Category");
 const { validationResult } = require("express-validator");
 const Inventory = require("../models/Inventory");
 
+// Helper function to upload image to Cloudinary
+const uploadImageToCloudinary = async (file, productId, index) => {
+  try {
+    // Convert buffer to base64
+    const b64 = Buffer.from(file.buffer).toString("base64");
+    const dataURI = `data:${file.mimetype};base64,${b64}`;
+
+    // Upload to Cloudinary
+    const result = await cloudinary.uploader.upload(dataURI, {
+      folder: `products/${productId}`,
+      public_id: `image-${index + 1}`,
+      overwrite: true,
+      transformation: [
+        { width: 1000, height: 1000, crop: "limit" }, // Resize if too large
+        { quality: "auto" }, // Automatic quality optimization
+      ],
+    });
+
+    return {
+      url: result.secure_url,
+      publicId: result.public_id,
+    };
+  } catch (error) {
+    console.error(`Error uploading image ${index}:`, error);
+    throw new Error(`Failed to upload image ${index + 1}`);
+  }
+};
+// @desc    Get all products with filtering, sorting, and pagination
+// @route   GET /api/admin/products
+// @access  Private/Admin
 // @desc    Get all products with filtering, sorting, and pagination
 // @route   GET /api/admin/products
 // @access  Private/Admin
@@ -15,6 +46,7 @@ exports.getProducts = async (req, res) => {
       search,
       minPrice,
       maxPrice,
+      stockStatus, // Add this for filtering by stock status
       sortBy = "createdAt",
       sortOrder = "desc",
       limit = 10,
@@ -65,16 +97,114 @@ exports.getProducts = async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Execute query with population
-    const products = await Product.find(query)
+    // Execute query to get products first
+    let products = await Product.find(query)
       .populate("category", "name slug")
       .sort(sort)
       .skip(skip)
       .limit(limitNum)
       .lean();
 
-    // Get total count for pagination
-    const total = await Product.countDocuments(query);
+    // Get inventory data for all products
+    const productIds = products.map((p) => p._id);
+
+    // Aggregate inventory data
+    const inventoryData = await Inventory.aggregate([
+      {
+        $match: {
+          product: { $in: productIds },
+        },
+      },
+      {
+        $group: {
+          _id: "$product",
+          totalStock: { $sum: "$currentStock" },
+          variantCount: { $sum: 1 },
+          lowStockThreshold: { $first: "$lowStockThreshold" },
+          variants: {
+            $push: {
+              color: "$variant.color",
+              size: "$variant.size",
+              stock: "$currentStock",
+              location: "$location",
+              status: "$status",
+            },
+          },
+          // Get min stock for low stock detection
+          minStock: { $min: "$currentStock" },
+          // Get max stock
+          maxStock: { $max: "$currentStock" },
+        },
+      },
+    ]);
+
+    // Create a map for easy lookup
+    const inventoryMap = {};
+    inventoryData.forEach((item) => {
+      inventoryMap[item._id.toString()] = item;
+    });
+
+    // Add inventory data to each product
+    products = products.map((product) => {
+      const inventory = inventoryMap[product._id.toString()] || {
+        totalStock: 0,
+        variantCount: 0,
+        lowStockThreshold: 10,
+        variants: [],
+      };
+
+      // Determine stock status
+      let stockStatus = "in-stock";
+      if (inventory.totalStock === 0) {
+        stockStatus = "out-of-stock";
+      } else if (inventory.totalStock <= inventory.lowStockThreshold) {
+        stockStatus = "low-stock";
+      }
+
+      return {
+        ...product,
+        stock: inventory.totalStock,
+        stockStatus: stockStatus,
+        lowStockThreshold: inventory.lowStockThreshold,
+        variantCount: inventory.variantCount,
+        variants: inventory.variants,
+        inventorySummary: {
+          total: inventory.totalStock,
+          variants: inventory.variantCount,
+          minStock: inventory.minStock || 0,
+          maxStock: inventory.maxStock || 0,
+        },
+      };
+    });
+
+    // Filter by stock status if provided
+    if (stockStatus && stockStatus !== "all") {
+      products = products.filter((p) => p.stockStatus === stockStatus);
+    }
+
+    // Get total count for pagination (considering stock filter if applied)
+    let total;
+    if (stockStatus && stockStatus !== "all") {
+      // If stock filter is applied, we need to count filtered results
+      total = products.length;
+    } else {
+      total = await Product.countDocuments(query);
+    }
+
+    // Calculate additional stats for the response
+    const stats = {
+      totalProducts: total,
+      totalStock: products.reduce((sum, p) => sum + p.stock, 0),
+      productsWithStock: products.filter((p) => p.stock > 0).length,
+      productsOutOfStock: products.filter((p) => p.stock === 0).length,
+      productsLowStock: products.filter(
+        (p) => p.stock > 0 && p.stock <= (p.lowStockThreshold || 10)
+      ).length,
+      totalInventoryValue: products.reduce(
+        (sum, p) => sum + p.price * p.stock,
+        0
+      ),
+    };
 
     res.json({
       success: true,
@@ -83,6 +213,7 @@ exports.getProducts = async (req, res) => {
       page: pageNum,
       pages: Math.ceil(total / limitNum),
       products,
+      stats, // Send stats for the dashboard
     });
   } catch (error) {
     console.error("Get products error:", error);
@@ -142,6 +273,12 @@ exports.createProduct = async (req, res) => {
 
     const { sku, category, variants = [] } = req.body;
 
+    // Check if there are files uploaded (multer handles these)
+    const uploadedFiles = req.files || [];
+
+    // Check for base64 images in the request body
+    const base64Images = req.body.images || [];
+
     // Check if SKU exists
     const existingProduct = await Product.findOne({ sku });
     if (existingProduct) {
@@ -160,63 +297,154 @@ exports.createProduct = async (req, res) => {
       });
     }
 
-    // Create product
-    const product = new Product(req.body);
+    // Create a copy of req.body without the images field
+    const productData = { ...req.body };
+    delete productData.images; // Remove images from product data initially
+
+    // Create product first to get the ID
+    const product = new Product({
+      ...productData,
+      images: [], // Temporary empty array
+    });
+
     await product.save();
 
-    // Create inventory records
-    if (variants.length > 0) {
-      const inventoryPromises = variants.map((variant, index) => {
-        // Generate location code (e.g., A1-01, A1-02, etc.)
-        const row = String.fromCharCode(65 + Math.floor(index / 10)); // A, B, C, etc.
-        const bay = (index % 10) + 1;
-        const location = `${row}${bay}-${String(index + 1).padStart(2, "0")}`;
+    try {
+      // Upload images to Cloudinary
+      const uploadedImageUrls = [];
 
-        return Inventory.create({
+      // 1. Upload file images from multer (if any)
+      if (uploadedFiles && uploadedFiles.length > 0) {
+        for (let i = 0; i < uploadedFiles.length; i++) {
+          const file = uploadedFiles[i];
+          const imageData = await uploadImageToCloudinary(file, product._id, i);
+          uploadedImageUrls.push(imageData.url);
+        }
+      }
+
+      // 2. Upload base64 images from request body (if any)
+      if (base64Images && base64Images.length > 0) {
+        for (let i = 0; i < base64Images.length; i++) {
+          const base64Image = base64Images[i];
+
+          // Skip if it's empty or not a valid base64 string
+          if (
+            !base64Image ||
+            typeof base64Image !== "string" ||
+            !base64Image.startsWith("data:image")
+          ) {
+            continue;
+          }
+
+          try {
+            // Extract the base64 data
+            const base64Data = base64Image.split(",")[1] || base64Image;
+
+            // Determine mimetype from the base64 string
+            let mimetype = "image/jpeg"; // default
+            if (base64Image.startsWith("data:image/png")) {
+              mimetype = "image/png";
+            } else if (base64Image.startsWith("data:image/gif")) {
+              mimetype = "image/gif";
+            } else if (base64Image.startsWith("data:image/webp")) {
+              mimetype = "image/webp";
+            } else if (
+              base64Image.startsWith("data:image/jpeg") ||
+              base64Image.startsWith("data:image/jpg")
+            ) {
+              mimetype = "image/jpeg";
+            }
+
+            // Convert base64 to buffer
+            const buffer = Buffer.from(base64Data, "base64");
+
+            // Create a file-like object for the upload function
+            const fileObject = {
+              buffer: buffer,
+              mimetype: mimetype,
+              originalname: `image-${uploadedFiles.length + i + 1}.jpg`,
+            };
+
+            const imageData = await uploadImageToCloudinary(
+              fileObject,
+              product._id,
+              uploadedFiles.length + i
+            );
+            uploadedImageUrls.push(imageData.url);
+          } catch (imageError) {
+            console.error(`Error uploading base64 image ${i}:`, imageError);
+            // Continue with other images even if one fails
+          }
+        }
+      }
+
+      // Update product with uploaded images
+      if (uploadedImageUrls.length > 0) {
+        product.images = uploadedImageUrls;
+        await product.save();
+      }
+
+      // Create inventory records (rest of your code remains the same)
+      if (variants.length > 0) {
+        const inventoryPromises = variants.map((variant, index) => {
+          const row = String.fromCharCode(65 + Math.floor(index / 10));
+          const bay = (index % 10) + 1;
+          const location = `${row}${bay}-${String(index + 1).padStart(2, "0")}`;
+
+          return Inventory.create({
+            product: product._id,
+            variant: {
+              color: variant.color,
+              size: variant.size,
+            },
+            currentStock: variant.stock || 0,
+            unitCost: req.body.costPrice || 0,
+            lowStockThreshold: 10,
+            location: location,
+            warehouse: "Main Warehouse",
+            status: (variant.stock || 0) > 0 ? "in-stock" : "out-of-stock",
+            reorderPoint: 5,
+            reorderQuantity: 50,
+            supplier: "Default Supplier",
+            leadTime: 7,
+          });
+        });
+
+        await Promise.all(inventoryPromises);
+      } else {
+        await Inventory.create({
           product: product._id,
-          variant: {
-            color: variant.color,
-            size: variant.size,
-          },
-          currentStock: variant.stock || 0,
+          currentStock: 0,
           unitCost: req.body.costPrice || 0,
           lowStockThreshold: 10,
-          location: location,
+          location: "A1-01",
           warehouse: "Main Warehouse",
-          status: (variant.stock || 0) > 0 ? "in-stock" : "out-of-stock",
+          status: "out-of-stock",
           reorderPoint: 5,
           reorderQuantity: 50,
           supplier: "Default Supplier",
           leadTime: 7,
         });
-      });
+      }
 
-      await Promise.all(inventoryPromises);
-    } else {
-      // For products without variants
-      await Inventory.create({
-        product: product._id,
-        currentStock: 0, // Start with 0 stock
-        unitCost: req.body.costPrice || 0,
-        lowStockThreshold: 10,
-        location: "A1-01",
-        warehouse: "Main Warehouse",
-        status: "out-of-stock",
-        reorderPoint: 5,
-        reorderQuantity: 50,
-        supplier: "Default Supplier",
-        leadTime: 7,
+      // Populate for response
+      await product.populate("category", "name slug");
+
+      res.status(201).json({
+        success: true,
+        message: "Product created successfully",
+        product,
+      });
+    } catch (uploadError) {
+      // If image upload fails, delete the product we created
+      await Product.findByIdAndDelete(product._id);
+
+      console.error("Image upload error:", uploadError);
+      return res.status(400).json({
+        success: false,
+        message: uploadError.message || "Failed to upload images",
       });
     }
-
-    // Populate for response
-    await product.populate("category", "name slug");
-
-    res.status(201).json({
-      success: true,
-      message: "Product created successfully",
-      product,
-    });
   } catch (error) {
     console.error("Create product error:", error);
 
@@ -287,8 +515,101 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
+    // Handle image updates
+    const uploadedFiles = req.files || [];
+    const base64Images = req.body.images || [];
+    const existingImageUrls = req.body.existingImages || []; // You might send this from frontend
+    const imagesToKeep = [];
+
+    // Determine which images to keep from existing ones
+    if (existingImageUrls.length > 0) {
+      // If frontend sends list of existing images to keep
+      imagesToKeep.push(...existingImageUrls);
+    } else {
+      // If no existingImages sent, keep all current images (default behavior)
+      imagesToKeep.push(...product.images);
+    }
+
+    // Upload new images
+    const newImageUrls = [];
+
+    // Upload file images from multer
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      for (let i = 0; i < uploadedFiles.length; i++) {
+        const file = uploadedFiles[i];
+        const imageData = await uploadImageToCloudinary(
+          file,
+          product._id,
+          Date.now() + i
+        );
+        newImageUrls.push(imageData.url);
+      }
+    }
+
+    // Upload base64 images
+    if (base64Images && base64Images.length > 0) {
+      for (let i = 0; i < base64Images.length; i++) {
+        const base64Image = base64Images[i];
+
+        if (
+          !base64Image ||
+          typeof base64Image !== "string" ||
+          !base64Image.startsWith("data:image")
+        ) {
+          continue;
+        }
+
+        try {
+          const base64Data = base64Image.split(",")[1] || base64Image;
+
+          let mimetype = "image/jpeg";
+          if (base64Image.startsWith("data:image/png")) {
+            mimetype = "image/png";
+          } else if (base64Image.startsWith("data:image/gif")) {
+            mimetype = "image/gif";
+          } else if (base64Image.startsWith("data:image/webp")) {
+            mimetype = "image/webp";
+          }
+
+          const buffer = Buffer.from(base64Data, "base64");
+
+          const fileObject = {
+            buffer: buffer,
+            mimetype: mimetype,
+            originalname: `image-${uploadedFiles.length + i + 1}.jpg`,
+          };
+
+          const imageData = await uploadImageToCloudinary(
+            fileObject,
+            product._id,
+            Date.now() + uploadedFiles.length + i
+          );
+          newImageUrls.push(imageData.url);
+        } catch (imageError) {
+          console.error(`Error uploading base64 image ${i}:`, imageError);
+        }
+      }
+    }
+
+    // Combine kept images with new ones
+    const finalImages = [...imagesToKeep, ...newImageUrls];
+
+    // Prepare update data
+    const updateData = { ...req.body };
+
+    // Handle images in update
+    if (finalImages.length > 0) {
+      updateData.images = finalImages;
+    } else if (req.body.images === null || req.body.images === undefined) {
+      // If images field is explicitly set to null/undefined, keep existing
+      delete updateData.images;
+    }
+
+    // Remove the images field from req.body if it exists to avoid conflicts
+    delete updateData.images; // We already set it above if needed
+
     // Update product
-    product = await Product.findByIdAndUpdate(req.params.id, req.body, {
+    product = await Product.findByIdAndUpdate(req.params.id, updateData, {
       new: true,
       runValidators: true,
     }).populate("category", "name slug");
@@ -301,7 +622,6 @@ exports.updateProduct = async (req, res) => {
   } catch (error) {
     console.error("Update product error:", error);
 
-    // Handle duplicate key errors
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
@@ -309,7 +629,6 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
-    // Handle validation errors
     if (error.name === "ValidationError") {
       return res.status(400).json({
         success: false,
@@ -340,7 +659,7 @@ exports.deleteProduct = async (req, res) => {
       });
     }
 
-    // Check if product has any orders (optional - you might want to check this)
+    // Check if product has any orders (optional)
     // const orderCount = await Order.countDocuments({ 'items.product': req.params.id });
     // if (orderCount > 0) {
     //   return res.status(400).json({
@@ -349,12 +668,50 @@ exports.deleteProduct = async (req, res) => {
     //   });
     // }
 
+    // Delete images from Cloudinary
+    if (product.images && product.images.length > 0) {
+      try {
+        for (const imageUrl of product.images) {
+          // Extract public_id from Cloudinary URL
+          // Cloudinary URL format: https://res.cloudinary.com/cloud-name/image/upload/v1234567890/products/product-id/image-1.jpg
+          const urlParts = imageUrl.split("/");
+          const publicIdWithExtension = urlParts[urlParts.length - 1];
+          const publicId = publicIdWithExtension.split(".")[0]; // Remove file extension
+
+          // Get the folder path
+          const folderPath = urlParts[urlParts.length - 2];
+
+          if (folderPath === "upload") {
+            // For images in the main folder
+            await cloudinary.uploader.destroy(publicId);
+          } else {
+            // For images in product folder
+            const fullPublicId = `${folderPath}/${publicId}`;
+            await cloudinary.uploader.destroy(fullPublicId);
+          }
+        }
+
+        // Optional: Delete the entire product folder from Cloudinary
+        await cloudinary.api.delete_folder(`products/${product._id}`);
+      } catch (cloudinaryError) {
+        console.error(
+          "Error deleting images from Cloudinary:",
+          cloudinaryError
+        );
+        // Continue with product deletion even if image deletion fails
+        // You might want to log this but not block the product deletion
+      }
+    }
+
+    // Delete inventory records associated with this product
+    await Inventory.deleteMany({ product: product._id });
+
     // Delete the product
     await Product.findByIdAndDelete(req.params.id);
 
     res.json({
       success: true,
-      message: "Product deleted successfully",
+      message: "Product and associated images deleted successfully",
     });
   } catch (error) {
     console.error("Delete product error:", error);

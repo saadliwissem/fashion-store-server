@@ -74,13 +74,13 @@ app.use(cors("*"));
 // Increase payload size limit
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
-app.use(morgan("dev")); // HTTP request logger
+//app.use(morgan("dev")); // HTTP request logger
 
 // Static folder (for uploaded images)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Apply rate limiting to all API routes
-app.use("/api/", apiLimiter);
+//app.use("/api/", apiLimiter);
 
 // ==================== PUBLIC API ROUTES ====================
 

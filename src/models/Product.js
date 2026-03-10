@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const slugify = require("slugify");
+const { updateMultipleCategoryStats } = require("../utils/categoryUtils");
 
 const variantSchema = new mongoose.Schema({
   color: String,
@@ -235,7 +236,65 @@ productSchema.pre("save", function (next) {
 
   next();
 });
+// After saving a product
+productSchema.post("save", async function (doc) {
+  try {
+    if (doc.category) {
+      await updateMultipleCategoryStats([doc.category]);
+    }
+  } catch (error) {
+    console.error("Error updating category after product save:", error);
+  }
+});
 
+// After updating a product
+productSchema.post("findOneAndUpdate", async function (doc) {
+  try {
+    if (doc && doc.category) {
+      // Also update the old category if it changed
+      const oldCategory = this._update?.category; // This might need adjustment
+      const categoriesToUpdate = [doc.category];
+
+      if (oldCategory && oldCategory !== doc.category) {
+        categoriesToUpdate.push(oldCategory);
+      }
+
+      await updateMultipleCategoryStats(categoriesToUpdate);
+    }
+  } catch (error) {
+    console.error("Error updating category after product update:", error);
+  }
+});
+
+// After deleting a product
+productSchema.post("findOneAndDelete", async function (doc) {
+  try {
+    if (doc && doc.category) {
+      await updateMultipleCategoryStats([doc.category]);
+    }
+  } catch (error) {
+    console.error("Error updating category after product delete:", error);
+  }
+});
+
+// After deleting multiple products
+productSchema.post("deleteMany", async function (doc) {
+  try {
+    // Get categories from deleted products
+    const deletedProducts = doc || [];
+    const categoryIds = [
+      ...new Set(
+        deletedProducts.map((p) => p.category?.toString()).filter(Boolean)
+      ),
+    ];
+
+    if (categoryIds.length > 0) {
+      await updateMultipleCategoryStats(categoryIds);
+    }
+  } catch (error) {
+    console.error("Error updating categories after product deleteMany:", error);
+  }
+});
 // Indexes for better query performance
 // Simplify indexes to only what's necessary:
 productSchema.index({ category: 1, status: 1, createdAt: -1 }); // Compound index
