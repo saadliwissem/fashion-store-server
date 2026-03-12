@@ -279,7 +279,10 @@ const getFeaturedProducts = asyncHandler(async (req, res) => {
     status: "active",
   })
     .limit(8)
-    .select("name price images slug originalPrice averageRating")
+    .select(
+      "name price images slug originalPrice averageRating description isNew isSale category"
+    )
+    .populate("category", "name") // This will populate the category field with only the name
     .lean();
 
   res.json({
