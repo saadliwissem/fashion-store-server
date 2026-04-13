@@ -1,8 +1,11 @@
+// controllers/adminchronicleController.js
 const Chronicle = require("../models/Chronicle");
 const Enigma = require("../models/Enigma");
 const Fragment = require("../models/Fragment");
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/ErrorResponse");
+const { uploadImageToCloudinary } = require("../utils/cloudinaryUpload");
+const cloudinary = require("../config/cloudinary");
 const mongoose = require("mongoose");
 
 // @desc    Get all chronicles with filtering
@@ -111,7 +114,41 @@ exports.getChronicle = asyncHandler(async (req, res) => {
 // @route   POST /api/admin/chronicles
 // @access  Private/Admin
 exports.createChronicle = asyncHandler(async (req, res) => {
-  const chronicle = await Chronicle.create(req.body);
+  const chronicleData = { ...req.body };
+
+  // Handle cover image upload if it's base64
+  if (
+    chronicleData.coverImage &&
+    chronicleData.coverImage.url &&
+    chronicleData.coverImage.url.startsWith("data:image")
+  ) {
+    try {
+      // Create a folder name based on the chronicle name
+      const folderName = `chronicles/${chronicleData.name
+        .replace(/\s+/g, "-")
+        .toLowerCase()}`;
+
+      const uploadedCover = await uploadImageToCloudinary(
+        chronicleData.coverImage.url,
+        folderName,
+        "cover"
+      );
+      chronicleData.coverImage = {
+        url: uploadedCover.url,
+        publicId: uploadedCover.publicId,
+        alt: chronicleData.coverImage.alt || chronicleData.name,
+      };
+    } catch (error) {
+      console.error("Cover image upload failed:", error);
+      // Remove the cover image if upload fails
+      delete chronicleData.coverImage;
+    }
+  }
+
+  // Remove any fields that shouldn't be saved
+  delete chronicleData._id;
+
+  const chronicle = await Chronicle.create(chronicleData);
 
   // Update enigma metadata
   await Enigma.findByIdAndUpdate(chronicle.enigma, {
@@ -128,17 +165,89 @@ exports.createChronicle = asyncHandler(async (req, res) => {
 // @route   PUT /api/admin/chronicles/:id
 // @access  Private/Admin
 exports.updateChronicle = asyncHandler(async (req, res) => {
-  const chronicle = await Chronicle.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-    runValidators: true,
-  });
+  const { id } = req.params;
+  const updateData = { ...req.body };
 
-  if (!chronicle) {
+  // Find existing chronicle
+  const existingChronicle = await Chronicle.findById(id);
+  if (!existingChronicle) {
     return res.status(404).json({
       success: false,
       message: "Chronicle not found",
     });
   }
+
+  // Handle cover image update
+  if (updateData.coverImage) {
+    // If it's a new base64 image, upload to Cloudinary
+    if (
+      updateData.coverImage.url &&
+      updateData.coverImage.url.startsWith("data:image")
+    ) {
+      try {
+        // Delete old image if exists
+        if (existingChronicle.coverImage?.publicId) {
+          await cloudinary.uploader.destroy(
+            existingChronicle.coverImage.publicId
+          );
+        }
+
+        const folderName = `chronicles/${
+          updateData.name || existingChronicle.name
+        }`;
+        const uploadedCover = await uploadImageToCloudinary(
+          updateData.coverImage.url,
+          folderName,
+          "cover"
+        );
+        updateData.coverImage = {
+          url: uploadedCover.url,
+          publicId: uploadedCover.publicId,
+          alt:
+            updateData.coverImage.alt ||
+            updateData.name ||
+            existingChronicle.name,
+        };
+      } catch (error) {
+        console.error("Cover image upload failed:", error);
+        delete updateData.coverImage;
+      }
+    }
+    // If coverImage is being removed or set to empty
+    else if (!updateData.coverImage.url) {
+      if (existingChronicle.coverImage?.publicId) {
+        await cloudinary.uploader.destroy(
+          existingChronicle.coverImage.publicId
+        );
+      }
+      updateData.coverImage = { url: "", alt: "", publicId: "" };
+    }
+    // If coverImage URL is already a Cloudinary URL, keep it as is
+    else if (
+      updateData.coverImage.url &&
+      updateData.coverImage.url.includes("cloudinary")
+    ) {
+      // Keep existing Cloudinary URL, no changes needed
+    }
+  }
+
+  // Handle rewards: Remove any temporary _id fields if they exist
+  if (updateData.rewards && Array.isArray(updateData.rewards)) {
+    updateData.rewards = updateData.rewards.map((reward) => {
+      const { _id, tempId, ...cleanReward } = reward;
+      return cleanReward;
+    });
+  }
+
+  // Remove fields that shouldn't be updated
+  delete updateData._id;
+  delete updateData.createdAt;
+  delete updateData.__v;
+
+  const chronicle = await Chronicle.findByIdAndUpdate(id, updateData, {
+    new: true,
+    runValidators: true,
+  }).populate("enigma", "name status");
 
   res.json({
     success: true,
@@ -150,8 +259,9 @@ exports.updateChronicle = asyncHandler(async (req, res) => {
 // @route   DELETE /api/admin/chronicles/:id
 // @access  Private/Admin
 exports.deleteChronicle = asyncHandler(async (req, res) => {
-  const chronicle = await Chronicle.findById(req.params.id);
+  const { id } = req.params;
 
+  const chronicle = await Chronicle.findById(id);
   if (!chronicle) {
     return res.status(404).json({
       success: false,
@@ -169,6 +279,16 @@ exports.deleteChronicle = asyncHandler(async (req, res) => {
       message:
         "Cannot delete chronicle with existing fragments. Delete fragments first.",
     });
+  }
+
+  // Delete associated image from Cloudinary
+  if (chronicle.coverImage?.publicId) {
+    try {
+      await cloudinary.uploader.destroy(chronicle.coverImage.publicId);
+    } catch (error) {
+      console.error("Failed to delete cover image from Cloudinary:", error);
+      // Continue with deletion even if image deletion fails
+    }
   }
 
   await chronicle.deleteOne();

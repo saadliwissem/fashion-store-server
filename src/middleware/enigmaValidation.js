@@ -39,7 +39,22 @@ exports.validateEnigma = [
     .isBoolean()
     .withMessage("Featured must be a boolean"),
 
-  body("tags").optional().isArray().withMessage("Tags must be an array"),
+  body("tags")
+    .optional()
+    .isArray()
+    .withMessage("Tags must be an array")
+    .custom((tags) => {
+      if (tags && tags.length > 20) {
+        throw new Error("Cannot have more than 20 tags");
+      }
+      return true;
+    }),
+
+  body("tags.*")
+    .optional()
+    .trim()
+    .isLength({ min: 1, max: 30 })
+    .withMessage("Each tag must be between 1 and 30 characters"),
 
   body("creator.name")
     .optional()
@@ -47,11 +62,202 @@ exports.validateEnigma = [
     .isLength({ max: 100 })
     .withMessage("Creator name cannot exceed 100 characters"),
 
+  // body("creator.avatar")
+  //   .optional()
+  //   .isURL()
+  //   .withMessage("Creator avatar must be a valid URL")
+  //   .custom((value) => {
+  //     if (value === "") return true; // Allow empty string
+  //     return true;
+  //   }),
+
+  // body("creator.bio")
+  //   .optional()
+  //   .trim()
+  //   .isLength({ max: 500 })
+  //   .withMessage("Creator bio cannot exceed 500 characters"),
+
+  body("location.country")
+    .optional()
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage("Country name cannot exceed 100 characters"),
+
+  body("location.city")
+    .optional()
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage("City name cannot exceed 100 characters"),
+
+  body("location.virtual")
+    .optional()
+    .isBoolean()
+    .withMessage("Virtual must be a boolean"),
+
+  // Cover Image Validation
+  body("coverImage.url")
+    .optional()
+    .custom((value) => {
+      if (
+        value &&
+        !value.startsWith("data:image") &&
+        !value.startsWith("http")
+      ) {
+        throw new Error(
+          "Cover image must be a valid image URL or base64 string"
+        );
+      }
+      return true;
+    }),
+
+  body("coverImage.alt")
+    .optional()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage("Alt text cannot exceed 200 characters"),
+
+  // Banner Image Validation
+  body("bannerImage.url")
+    .optional()
+    .custom((value) => {
+      if (
+        value &&
+        !value.startsWith("data:image") &&
+        !value.startsWith("http")
+      ) {
+        throw new Error(
+          "Banner image must be a valid image URL or base64 string"
+        );
+      }
+      return true;
+    }),
+
+  body("bannerImage.alt")
+    .optional()
+    .trim()
+    .isLength({ max: 200 })
+    .withMessage("Alt text cannot exceed 200 characters"),
+
+  // Rewards Validation
+  body("rewards").optional().isArray().withMessage("Rewards must be an array"),
+
   body("rewards.*.name")
     .optional()
     .trim()
     .notEmpty()
-    .withMessage("Reward name is required if reward is provided"),
+    .withMessage("Reward name is required if reward is provided")
+    .isLength({ max: 100 })
+    .withMessage("Reward name cannot exceed 100 characters"),
+
+  body("rewards.*.description")
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage("Reward description is required if reward is provided")
+    .isLength({ max: 500 })
+    .withMessage("Reward description cannot exceed 500 characters"),
+
+  body("rewards.*.type")
+    .optional()
+    .isIn(["badge", "nft", "physical", "experience"])
+    .withMessage("Reward type must be badge, nft, physical, or experience"),
+
+  body("rewards.*.rarity")
+    .optional()
+    .isIn(["common", "rare", "legendary"])
+    .withMessage("Reward rarity must be common, rare, or legendary"),
+
+  body("rewards.*.image")
+    .optional()
+    .custom((value) => {
+      if (value && value !== "" && !value.match(/^https?:\/\/.+/)) {
+        throw new Error(
+          "Reward image must be a valid URL (starting with http:// or https://)"
+        );
+      }
+      return true;
+    }),
+  // Stats Validation (for updates)
+  body("stats.activeKeepers")
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage("Active keepers must be a positive integer"),
+
+  body("stats.totalValueLocked")
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage("Total value locked must be a positive number"),
+
+  body("stats.completionRate")
+    .optional()
+    .isFloat({ min: 0, max: 100 })
+    .withMessage("Completion rate must be between 0 and 100"),
+
+  body("stats.averageTimeToComplete")
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage("Average time to complete must be a positive number"),
+
+  // Metadata Validation
+  body("metadata.totalChronicles")
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage("Total chronicles must be a positive integer"),
+
+  body("metadata.totalFragments")
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage("Total fragments must be a positive integer"),
+
+  body("metadata.fragmentsClaimed")
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage("Fragments claimed must be a positive integer"),
+
+  // SEO Validation
+  body("seo.title")
+    .optional()
+    .trim()
+    .isLength({ max: 60 })
+    .withMessage("SEO title cannot exceed 60 characters"),
+
+  body("seo.description")
+    .optional()
+    .trim()
+    .isLength({ max: 160 })
+    .withMessage("SEO description cannot exceed 160 characters"),
+
+  body("seo.keywords")
+    .optional()
+    .isArray()
+    .withMessage("SEO keywords must be an array"),
+
+  body("seo.keywords.*")
+    .optional()
+    .trim()
+    .isLength({ min: 1, max: 30 })
+    .withMessage("Each keyword must be between 1 and 30 characters"),
+
+  // Date Validation
+  body("startDate")
+    .optional()
+    .isISO8601()
+    .withMessage("Start date must be a valid date"),
+
+  body("estimatedEnd")
+    .optional()
+    .isISO8601()
+    .withMessage("Estimated end date must be a valid date")
+    .custom((value, { req }) => {
+      if (
+        req.body.startDate &&
+        value &&
+        new Date(value) <= new Date(req.body.startDate)
+      ) {
+        throw new Error("Estimated end date must be after start date");
+      }
+      return true;
+    }),
 ];
 
 // Chronicle validation
@@ -167,10 +373,10 @@ exports.validateFragment = [
     .isIn(["common", "rare", "legendary"])
     .withMessage("Rarity must be common, rare, or legendary"),
 
-  body("estimatedDelivery")
-    .optional()
-    .isISO8601()
-    .withMessage("Estimated delivery must be a valid date"),
+  // body("estimatedDelivery")
+  //   .optional()
+  //   .isISO8601()
+  //   .withMessage("Estimated delivery must be a valid date"),
 
   body("features")
     .optional()

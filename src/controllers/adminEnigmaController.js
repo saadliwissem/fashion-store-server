@@ -3,6 +3,7 @@ const Enigma = require("../models/Enigma");
 const Chronicle = require("../models/Chronicle");
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/ErrorResponse");
+const { uploadImageToCloudinary } = require("../utils/cloudinaryUpload");
 
 // @desc    Get all enigmas with filtering and pagination
 // @route   GET /api/admin/enigmas
@@ -83,8 +84,67 @@ exports.getEnigma = asyncHandler(async (req, res) => {
 // @desc    Create new enigma
 // @route   POST /api/admin/enigmas
 // @access  Private/Admin
+// @desc    Create new enigma
+// @route   POST /api/admin/enigmas
+// @access  Private/Admin
 exports.createEnigma = asyncHandler(async (req, res) => {
-  const enigma = await Enigma.create(req.body);
+  const enigmaData = { ...req.body };
+
+  // Handle cover image upload if it's base64
+  if (
+    enigmaData.coverImage &&
+    enigmaData.coverImage.url &&
+    enigmaData.coverImage.url.startsWith("data:image")
+  ) {
+    try {
+      const uploadedCover = await uploadImageToCloudinary(
+        enigmaData.coverImage.url,
+        `enigmas/${enigmaData.name.replace(/\s+/g, "-").toLowerCase()}`,
+        "cover"
+      );
+      enigmaData.coverImage = {
+        url: uploadedCover.url,
+        publicId: uploadedCover.publicId,
+        alt: enigmaData.coverImage.alt || enigmaData.name,
+      };
+    } catch (error) {
+      console.error("Cover image upload failed:", error);
+      // Keep the original base64 or remove it
+      if (enigmaData.coverImage.url.startsWith("data:image")) {
+        delete enigmaData.coverImage;
+      }
+    }
+  }
+
+  // Handle banner image upload if it's base64
+  if (
+    enigmaData.bannerImage &&
+    enigmaData.bannerImage.url &&
+    enigmaData.bannerImage.url.startsWith("data:image")
+  ) {
+    try {
+      const uploadedBanner = await uploadImageToCloudinary(
+        enigmaData.bannerImage.url,
+        `enigmas/${enigmaData.name.replace(/\s+/g, "-").toLowerCase()}`,
+        "banner"
+      );
+      enigmaData.bannerImage = {
+        url: uploadedBanner.url,
+        publicId: uploadedBanner.publicId,
+        alt: enigmaData.bannerImage.alt || enigmaData.name,
+      };
+    } catch (error) {
+      console.error("Banner image upload failed:", error);
+      if (enigmaData.bannerImage.url.startsWith("data:image")) {
+        delete enigmaData.bannerImage;
+      }
+    }
+  }
+
+  // Remove any fields that shouldn't be saved
+  delete enigmaData._id;
+
+  const enigma = await Enigma.create(enigmaData);
 
   res.status(201).json({
     success: true,
@@ -96,19 +156,99 @@ exports.createEnigma = asyncHandler(async (req, res) => {
 // @route   PUT /api/admin/enigmas/:id
 // @access  Private/Admin
 exports.updateEnigma = asyncHandler(async (req, res) => {
-  const enigma = await Enigma.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-    runValidators: true,
-  });
+  const { id } = req.params;
+  const updateData = { ...req.body };
 
-  if (!enigma) {
+  // Find existing enigma
+  const existingEnigma = await Enigma.findById(id);
+  if (!existingEnigma) {
     return res.status(404).json({
       success: false,
       message: "Enigma not found",
     });
   }
 
-  res.json({
+  // Handle cover image update
+  if (updateData.coverImage) {
+    // If it's a new base64 image, upload to Cloudinary
+    if (
+      updateData.coverImage.url &&
+      updateData.coverImage.url.startsWith("data:image")
+    ) {
+      try {
+        // Delete old image if exists
+        if (existingEnigma.coverImage?.publicId) {
+          await cloudinary.uploader.destroy(existingEnigma.coverImage.publicId);
+        }
+
+        const uploadedCover = await uploadImageToCloudinary(
+          updateData.coverImage.url,
+          `enigmas/${updateData.name || existingEnigma.name}`,
+          "cover"
+        );
+        updateData.coverImage = {
+          url: uploadedCover.url,
+          publicId: uploadedCover.publicId,
+          alt:
+            updateData.coverImage.alt || updateData.name || existingEnigma.name,
+        };
+      } catch (error) {
+        console.error("Cover image upload failed:", error);
+        delete updateData.coverImage;
+      }
+    }
+    // If coverImage is being removed or set to empty
+    else if (!updateData.coverImage.url) {
+      if (existingEnigma.coverImage?.publicId) {
+        await cloudinary.uploader.destroy(existingEnigma.coverImage.publicId);
+      }
+    }
+  }
+
+  // Handle banner image update (similar logic)
+  if (updateData.bannerImage) {
+    if (
+      updateData.bannerImage.url &&
+      updateData.bannerImage.url.startsWith("data:image")
+    ) {
+      try {
+        if (existingEnigma.bannerImage?.publicId) {
+          await cloudinary.uploader.destroy(
+            existingEnigma.bannerImage.publicId
+          );
+        }
+
+        const uploadedBanner = await uploadImageToCloudinary(
+          updateData.bannerImage.url,
+          `enigmas/${updateData.name || existingEnigma.name}`,
+          "banner"
+        );
+        updateData.bannerImage = {
+          url: uploadedBanner.url,
+          publicId: uploadedBanner.publicId,
+          alt:
+            updateData.bannerImage.alt ||
+            updateData.name ||
+            existingEnigma.name,
+        };
+      } catch (error) {
+        console.error("Banner image upload failed:", error);
+        delete updateData.bannerImage;
+      }
+    }
+  }
+
+  // Remove fields that shouldn't be updated
+  delete updateData._id;
+  delete updateData.createdAt;
+  delete updateData.__v;
+
+  const enigma = await Enigma.findByIdAndUpdate(id, updateData, {
+    new: true,
+    runValidators: true,
+  });
+
+  res.status(200).json({
     success: true,
     data: enigma,
   });
@@ -118,8 +258,9 @@ exports.updateEnigma = asyncHandler(async (req, res) => {
 // @route   DELETE /api/admin/enigmas/:id
 // @access  Private/Admin
 exports.deleteEnigma = asyncHandler(async (req, res) => {
-  const enigma = await Enigma.findById(req.params.id);
+  const { id } = req.params;
 
+  const enigma = await Enigma.findById(id);
   if (!enigma) {
     return res.status(404).json({
       success: false,
@@ -127,23 +268,26 @@ exports.deleteEnigma = asyncHandler(async (req, res) => {
     });
   }
 
-  // Check if enigma has chronicles
-  const chroniclesCount = await Chronicle.countDocuments({
-    enigma: enigma._id,
-  });
-  if (chroniclesCount > 0) {
-    return res.status(400).json({
-      success: false,
-      message:
-        "Cannot delete enigma with existing chronicles. Delete chronicles first.",
-    });
+  // Delete associated images from Cloudinary
+  const deletePromises = [];
+  if (enigma.coverImage?.publicId) {
+    deletePromises.push(
+      cloudinary.uploader.destroy(enigma.coverImage.publicId)
+    );
   }
+  if (enigma.bannerImage?.publicId) {
+    deletePromises.push(
+      cloudinary.uploader.destroy(enigma.bannerImage.publicId)
+    );
+  }
+
+  await Promise.all(deletePromises);
 
   await enigma.deleteOne();
 
-  res.json({
+  res.status(200).json({
     success: true,
-    data: {},
+    message: "Enigma deleted successfully",
   });
 });
 

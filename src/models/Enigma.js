@@ -61,6 +61,7 @@ const enigmaSchema = new mongoose.Schema(
     ],
     rewards: [
       {
+        _id: false,
         name: String,
         description: String,
         type: {

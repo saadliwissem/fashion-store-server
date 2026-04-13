@@ -105,7 +105,7 @@ app.use("/api/keepers", keeperRoutes);
 // ==================== ADMIN API ROUTES ====================
 
 // E-commerce Admin Routes
-app.use("/api/admin", adminRoutes);
+app.use("/api/adminn", adminRoutes);
 app.use("/api/admin/categories", adminCategoryRoutes);
 app.use("/api/admin/products", adminProductRoutes);
 app.use("/api/admin/inventory", adminInventoryRoutes);
