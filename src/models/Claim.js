@@ -37,7 +37,7 @@ const claimSchema = new mongoose.Schema(
       },
       size: {
         type: String,
-        enum: ["small", "medium", "large", "custom"],
+        enum: ["XS", "S", "M", "L", "XL", "XXL"],
       },
       customization: String,
       acceptTerms: Boolean,
@@ -46,7 +46,14 @@ const claimSchema = new mongoose.Schema(
     payment: {
       method: {
         type: String,
-        enum: ["stripe", "paypal", "crypto"],
+        enum: [
+          "card",
+          "edinar",
+          "cash_on_delivery",
+          "stripe",
+          "paypal",
+          "crypto",
+        ],
         required: true,
       },
       transactionId: String,
@@ -56,11 +63,11 @@ const claimSchema = new mongoose.Schema(
       },
       currency: {
         type: String,
-        default: "USD",
+        default: "TND",
       },
       status: {
         type: String,
-        enum: ["pending", "completed", "failed", "refunded"],
+        enum: ["pending", "pending_cod", "completed", "failed", "refunded"],
         default: "pending",
       },
       paidAt: Date,
@@ -101,8 +108,15 @@ const claimSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
+
+// Virtual for claimCode (returns claimId)
+claimSchema.virtual("claimCode").get(function () {
+  return this.claimId;
+});
 
 // Generate claim ID before saving
 claimSchema.pre("save", async function (next) {

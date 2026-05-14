@@ -390,6 +390,7 @@ exports.validateFragment = [
 ];
 
 // Claim validation
+// Claim validation
 exports.validateClaim = [
   body("fragmentId")
     .notEmpty()
@@ -398,15 +399,13 @@ exports.validateClaim = [
     .withMessage("Fragment ID must be a valid MongoDB ID"),
 
   body("userData.fullName")
+    .optional()
     .trim()
-    .notEmpty()
-    .withMessage("Full name is required")
     .isLength({ min: 2, max: 100 })
     .withMessage("Full name must be between 2 and 100 characters"),
 
   body("userData.email")
-    .notEmpty()
-    .withMessage("Email is required")
+    .optional()
     .isEmail()
     .withMessage("Valid email is required")
     .normalizeEmail(),
@@ -416,34 +415,33 @@ exports.validateClaim = [
     .matches(/^\+?[\d\s\-\(\)]+$/)
     .withMessage("Please provide a valid phone number"),
 
-  body("userData.shippingAddress.address")
-    .if(body("userData.shippingAddress").exists())
-    .notEmpty()
-    .withMessage("Shipping address is required"),
+  // Shipping address fields
+  body("userData.address").optional(),
+  body("userData.city").optional(),
+  body("userData.state").optional(),
+  body("userData.postalCode").optional(),
+  body("userData.country").optional(),
 
-  body("userData.shippingAddress.city")
-    .if(body("userData.shippingAddress").exists())
-    .notEmpty()
-    .withMessage("City is required"),
+  // Size validation
+  body("size")
+    .optional()
+    .isIn(["XS", "S", "M", "L", "XL", "XXL"])
+    .withMessage("Invalid size selection"),
 
-  body("userData.shippingAddress.postalCode")
-    .if(body("userData.shippingAddress").exists())
-    .notEmpty()
-    .withMessage("Postal code is required"),
-
-  body("userData.shippingAddress.country")
-    .if(body("userData.shippingAddress").exists())
-    .notEmpty()
-    .withMessage("Country is required"),
-
+  // Terms validation
   body("userData.acceptTerms")
+    .optional()
     .isBoolean()
-    .equals("true")
     .withMessage("Terms must be accepted"),
 
+  // UPDATED: Payment method validation for Tunisian payment methods
   body("paymentMethod")
-    .isIn(["stripe", "paypal", "crypto"])
-    .withMessage("Valid payment method required"),
+    .notEmpty()
+    .withMessage("Payment method is required")
+    .isIn(["card", "edinar", "cash_on_delivery"])
+    .withMessage(
+      "Valid payment method required (card, edinar, or cash_on_delivery)"
+    ),
 ];
 
 // Waitlist validation

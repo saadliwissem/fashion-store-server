@@ -60,6 +60,16 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    verificationCode: {
+      type: String,
+      default: null,
+    },
+    verificationCodeExpires: {
+      type: Date,
+    },
+    // For password change verification
+    passwordChangeCode: String,
+    passwordChangeCodeExpires: Date,
     googleId: {
       type: String,
       unique: true,

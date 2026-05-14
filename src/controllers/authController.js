@@ -8,6 +8,7 @@ const { sendEmail, emailTemplates } = require("../utils/sendEmail");
 const { validateRegister, validateLogin } = require("../utils/validators");
 const { OAuth2Client } = require("google-auth-library");
 const axios = require("axios");
+const KeeperProfile = require("../models/KeeperProfile");
 const googleClient = new OAuth2Client({
   clientId: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -260,10 +261,17 @@ const googleCallback = asyncHandler(async (req, res) => {
     });
   }
 });
+// Helper function to generate verification code
+const generateVerificationCode = () => {
+  return crypto.randomInt(100000, 999999).toString();
+};
 
 // @desc    Register user
 // @route   POST /api/auth/register
 // @access  Public
+// Register user
+// controllers/authController.js - Register function
+
 const register = asyncHandler(async (req, res) => {
   const { firstName, lastName, email, password, phone, newsletter } = req.body;
 
@@ -281,15 +289,22 @@ const register = asyncHandler(async (req, res) => {
     throw new Error("User already exists");
   }
 
-  // Create user
+  // Generate verification code
+  const crypto = require("crypto");
+  const verificationCode = crypto.randomInt(100000, 999999).toString();
+  const verificationCodeExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+
+  // Create user with email_not_verified
   const user = await User.create({
     firstName,
     lastName,
     email,
     password,
     phone,
-    newsletter,
-    emailVerified: false,
+    newsletter: newsletter || false,
+    emailVerified: false, // Important: Set to false initially
+    verificationCode,
+    verificationCodeExpires,
   });
 
   // Create cart for user
@@ -298,70 +313,433 @@ const register = asyncHandler(async (req, res) => {
   // Create wishlist for user
   await Wishlist.create({ user: user._id });
 
-  // Generate token
-  const token = generateToken(user._id);
+  // Create keeper profile
+  await KeeperProfile.create({
+    user: user._id,
+    stats: {
+      fragmentsClaimed: 0,
+      chroniclesCompleted: 0,
+      mysteriesSolved: 0,
+      totalSpent: 0,
+      waitlistEntries: 0,
+      claimsCount: 0,
+      uniqueChronicles: 0,
+      reputation: 0,
+    },
+  });
 
-  // Send welcome email
   try {
     await sendEmail({
       email: user.email,
-      subject: "Welcome to FashionStore Tunisia",
-      html: emailTemplates.welcome(user.firstName),
+      subject: "🔐 Verify Your PUZZLE Account",
+      html: emailTemplates.welcome(user.firstName, verificationCode),
     });
+    console.log("Verification email sent to:", user.email);
   } catch (emailError) {
-    console.error("Failed to send welcome email:", emailError);
+    console.error("Failed to send verification email:", emailError);
+    // Still create user but log error
   }
 
+  // IMPORTANT: Do NOT generate token or set user as logged in
+  // Return requiresVerification flag instead
   res.status(201).json({
     success: true,
+    requiresVerification: true,
+    message: "Please check your email for verification code",
+    user: {
+      id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      emailVerified: false,
+    },
+    // NO token returned here - user cannot login until verified
+  });
+});
+
+// Verify email with code
+const verifyEmail = asyncHandler(async (req, res) => {
+  const { code } = req.body;
+  const userId = req.user.id;
+
+  const user = await User.findById(userId);
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  // Check if already verified
+  if (user.emailVerified) {
+    return res.status(400).json({
+      success: false,
+      message: "Email already verified",
+    });
+  }
+
+  // Check if code matches and not expired
+  if (
+    user.verificationCode !== code ||
+    user.verificationCodeExpires < Date.now()
+  ) {
+    // Check if code expired
+    if (user.verificationCodeExpires < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: "Verification code has expired. Please request a new one.",
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: "Invalid verification code",
+    });
+  }
+
+  // Update user
+  user.emailVerified = true;
+  user.verificationCode = undefined;
+  user.verificationCodeExpires = undefined;
+  await user.save();
+
+  // Send confirmation email
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: "🎉 Email Verified - Welcome to PUZZLE!",
+      html: emailTemplates.emailVerified(user.firstName),
+    });
+  } catch (emailError) {
+    console.error(
+      "Failed to send verification confirmation email:",
+      emailError
+    );
+  }
+
+  res.status(200).json({
+    success: true,
+    message: "Email verified successfully",
+    user: {
+      id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      emailVerified: true,
+    },
+  });
+});
+const verifyEmailPublic = asyncHandler(async (req, res) => {
+  const { email, code } = req.body;
+
+  // Validate input
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      message: "Email is required",
+    });
+  }
+
+  if (!code || code.length !== 6) {
+    return res.status(400).json({
+      success: false,
+      message: "Valid 6-digit verification code is required",
+    });
+  }
+
+  // Find user by email
+  const user = await User.findOne({ email });
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+
+  // Check if already verified
+  if (user.emailVerified) {
+    return res.status(400).json({
+      success: false,
+      message: "Email already verified. Please login.",
+    });
+  }
+
+  // Check if code matches
+  if (user.verificationCode !== code) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid verification code",
+    });
+  }
+
+  // Check if code is expired
+  if (user.verificationCodeExpires < Date.now()) {
+    return res.status(400).json({
+      success: false,
+      message: "Verification code has expired. Please request a new one.",
+    });
+  }
+
+  // Update user as verified
+  user.emailVerified = true;
+  user.verificationCode = undefined;
+  user.verificationCodeExpires = undefined;
+  await user.save();
+
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: "🎉 Email Verified - Welcome to PUZZLE!",
+      html: emailTemplates.emailVerified(user.firstName),
+    });
+  } catch (emailError) {
+    console.error(
+      "Failed to send verification confirmation email:",
+      emailError
+    );
+    // Don't fail the request if email fails, user is already verified
+  }
+
+  // Generate token for auto-login (optional)
+
+  const token = generateToken(user._id, user.role);
+
+  res.status(200).json({
+    success: true,
+    message: "Email verified successfully! You can now log in.",
     token,
     user: {
       id: user._id,
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email,
-      phone: user.phone,
+      emailVerified: true,
       role: user.role,
-      avatar: user.avatar,
-      emailVerified: user.emailVerified,
     },
   });
 });
 
+// Resend verification code
+const resendVerificationCode = asyncHandler(async (req, res) => {
+  // Get user ID from req.user (added by protect middleware)
+  const userId = req.user;
+  console.log(userId);
+
+  if (!userId) {
+    return res.status(401).json({
+      success: false,
+      message: "User not authenticated",
+    });
+  }
+
+  const user = await User.findById(userId);
+
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+
+  if (user.emailVerified) {
+    return res.status(400).json({
+      success: false,
+      message: "Email already verified",
+    });
+  }
+
+  // Generate new verification code
+  const crypto = require("crypto");
+  const verificationCode = crypto.randomInt(100000, 999999).toString();
+  const verificationCodeExpires = Date.now() + 24 * 60 * 60 * 1000;
+
+  user.verificationCode = verificationCode;
+  user.verificationCodeExpires = verificationCodeExpires;
+  await user.save();
+
+  // Send new verification email
+  // const sendEmail = require("../utils/sendEmail");
+  // const emailTemplates = require("../utils/emailTemplates");
+
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: "🔐 Your New PUZZLE Verification Code",
+      html: emailTemplates.verificationCode(user.firstName, verificationCode),
+    });
+  } catch (emailError) {
+    console.error("Failed to send verification email:", emailError);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send verification email. Please try again.",
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    message: "Verification code sent to your email",
+  });
+});
+const resendVerificationCodePublic = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      message: "Email is required",
+    });
+  }
+
+  const user = await User.findOne({ email });
+
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: "User not found",
+    });
+  }
+
+  if (user.emailVerified) {
+    return res.status(400).json({
+      success: false,
+      message: "Email already verified",
+    });
+  }
+
+  // Generate new verification code
+  const crypto = require("crypto");
+  const verificationCode = crypto.randomInt(100000, 999999).toString();
+  const verificationCodeExpires = Date.now() + 24 * 60 * 60 * 1000;
+
+  user.verificationCode = verificationCode;
+  user.verificationCodeExpires = verificationCodeExpires;
+  await user.save();
+
+  // Send new verification email
+  // const sendEmail = require("../utils/sendEmail");
+  // const emailTemplates = require("../utils/emailTemplates");
+
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: "🔐 Your PUZZLE Verification Code",
+      html: emailTemplates.verificationCode(user.firstName, verificationCode),
+    });
+  } catch (emailError) {
+    console.error("Failed to send verification email:", emailError);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send verification email. Please try again.",
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    message: "Verification code sent to your email",
+  });
+});
 // @desc    Login user
 // @route   POST /api/auth/login
 // @access  Public
+
 const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
-  console.log(email);
-  console.log(password);
+
+  console.log("=== LOGIN ATTEMPT ===");
+  console.log("Email:", email);
+  console.log("Password provided:", password ? "Yes" : "No");
 
   // Validate input
   const validation = validateLogin(req.body);
+  console.log("Validation result:", validation);
+
   if (!validation.isValid) {
+    console.log("Validation failed:", validation.errors);
     res.status(400);
     throw new Error(Object.values(validation.errors).join(", "));
   }
 
   // Check for user
+  console.log("Searching for user with email:", email);
   const user = await User.findOne({ email }).select("+password");
+
   if (!user) {
+    console.log("User not found for email:", email);
     res.status(401);
     throw new Error("Invalid credentials");
   }
 
+  console.log("User found:", {
+    id: user._id,
+    email: user.email,
+    hasPassword: !!user.password,
+    emailVerified: user.emailVerified,
+    status: user.status,
+  });
+
   // Check password
+  console.log("Checking password...");
   const isPasswordMatch = await user.matchPassword(password);
+  console.log("Password match result:", isPasswordMatch);
+
   if (!isPasswordMatch) {
+    console.log("Password does not match");
     res.status(401);
     throw new Error("Invalid credentials");
   }
 
   // Check if user is active
   if (user.status !== "active") {
+    console.log("User account is inactive:", user.status);
     res.status(403);
     throw new Error("Account is inactive. Please contact support.");
   }
+
+  // Check if email is verified
+  if (!user.emailVerified) {
+    console.log("Email not verified for user:", user.email);
+
+    // Generate new verification code if needed
+    if (!user.verificationCode || user.verificationCodeExpires < Date.now()) {
+      console.log("Generating new verification code...");
+      const crypto = require("crypto");
+      const verificationCode = crypto.randomInt(100000, 999999).toString();
+      const verificationCodeExpires = Date.now() + 24 * 60 * 60 * 1000;
+
+      user.verificationCode = verificationCode;
+      user.verificationCodeExpires = verificationCodeExpires;
+      await user.save();
+
+      console.log("Verification code generated:", verificationCode);
+      console.log("Expires at:", new Date(verificationCodeExpires));
+
+      try {
+        await sendEmail({
+          email: user.email,
+          subject: "🔐 Verify Your PUZZLE Account",
+          html: emailTemplates.verificationCode(
+            user.firstName,
+            verificationCode
+          ),
+        });
+        console.log("Verification email sent successfully");
+      } catch (emailError) {
+        console.error("Failed to send verification email:", emailError);
+      }
+    } else {
+      console.log(
+        "Existing verification code found, expires:",
+        new Date(user.verificationCodeExpires)
+      );
+    }
+
+    // Return response WITHOUT throwing an error
+    return res.status(403).json({
+      success: false,
+      message:
+        "Please verify your email address before logging in. A verification code has been sent to your email.",
+    });
+  }
+
+  console.log("Login successful for user:", user.email);
 
   // Update last login
   user.lastLogin = Date.now();
@@ -370,6 +748,7 @@ const login = asyncHandler(async (req, res) => {
 
   // Generate token
   const token = generateToken(user._id, user.role);
+  console.log("Token generated:", token ? "Yes" : "No");
 
   res.json({
     success: true,
@@ -479,7 +858,176 @@ const updateProfile = asyncHandler(async (req, res) => {
     },
   });
 });
+// controllers/authController.js
 
+// Step 1: Send verification code to user's email
+const sendPasswordChangeVerification = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id);
+
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  // Generate verification code
+  const crypto = require("crypto");
+  const verificationCode = crypto.randomInt(100000, 999999).toString();
+  const verificationCodeExpires = Date.now() + 15 * 60 * 1000; // 15 minutes expiry
+
+  // Store verification code temporarily (you can add a separate field or reuse)
+  user.passwordChangeCode = verificationCode;
+  user.passwordChangeCodeExpires = verificationCodeExpires;
+  await user.save();
+
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: "🔐 Password Change Verification - PUZZLE",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Password Change Verification</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; margin: 0; padding: 20px; }
+            .container { max-width: 500px; margin: 0 auto; background: white; border-radius: 16px; padding: 32px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+            .code { font-size: 40px; font-weight: bold; letter-spacing: 8px; color: #7c3aed; background: #f5f3ff; padding: 20px; border-radius: 12px; margin: 20px 0; }
+            .warning { background: #fef2f2; border-left: 4px solid #ef4444; padding: 12px; border-radius: 8px; margin-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div style="font-size: 48px;">🧩</div>
+            <h2 style="color: #1f2937;">Password Change Request</h2>
+            <p>Hello ${user.firstName},</p>
+            <p>We received a request to change your password. Use the verification code below to proceed:</p>
+            <div class="code">${verificationCode}</div>
+            <p>This code will expire in <strong>15 minutes</strong>.</p>
+            <div class="warning">
+              <p style="color: #991b1b; margin: 0;">⚠️ If you didn't request this, please ignore this email and contact support immediately.</p>
+            </div>
+            <hr style="margin: 24px 0;">
+            <p style="color: #6b7280; font-size: 12px;">PUZZLE - Where Fashion Meets Mystery</p>
+          </div>
+        </body>
+        </html>
+      `,
+    });
+    console.log("Password change verification email sent to:", user.email);
+  } catch (emailError) {
+    console.error("Failed to send verification email:", emailError);
+    res.status(500);
+    throw new Error("Failed to send verification email");
+  }
+
+  res.json({
+    success: true,
+    message: "Verification code sent to your email",
+  });
+});
+
+// Step 2: Verify code and update password
+const updatePasswordWithVerification = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user.id).select("+password");
+
+  if (!user) {
+    res.status(404);
+    throw new Error("User not found");
+  }
+
+  const { currentPassword, newPassword, verificationCode } = req.body;
+
+  // Check current password
+  const isPasswordMatch = await user.matchPassword(currentPassword);
+  if (!isPasswordMatch) {
+    res.status(400);
+    throw new Error("Current password is incorrect");
+  }
+
+  // Validate verification code
+  if (!verificationCode) {
+    res.status(400);
+    throw new Error("Verification code is required");
+  }
+
+  if (user.passwordChangeCode !== verificationCode) {
+    res.status(400);
+    throw new Error("Invalid verification code");
+  }
+
+  if (user.passwordChangeCodeExpires < Date.now()) {
+    res.status(400);
+    throw new Error("Verification code has expired. Please request a new one.");
+  }
+
+  // Validate new password strength
+  if (newPassword.length < 8) {
+    res.status(400);
+    throw new Error("Password must be at least 8 characters");
+  }
+
+  if (!/[A-Z]/.test(newPassword)) {
+    res.status(400);
+    throw new Error("Password must contain at least one uppercase letter");
+  }
+
+  if (!/[0-9]/.test(newPassword)) {
+    res.status(400);
+    throw new Error("Password must contain at least one number");
+  }
+
+  if (!/[^A-Za-z0-9]/.test(newPassword)) {
+    res.status(400);
+    throw new Error("Password must contain at least one special character");
+  }
+
+  // Update password
+  user.password = newPassword;
+  user.passwordChangeCode = undefined;
+  user.passwordChangeCodeExpires = undefined;
+  await user.save();
+
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: "✅ Password Changed - PUZZLE",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Password Changed</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; margin: 0; padding: 20px; }
+            .container { max-width: 500px; margin: 0 auto; background: white; border-radius: 16px; padding: 32px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+            .success { font-size: 64px; margin-bottom: 16px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="success">✅</div>
+            <h2 style="color: #1f2937;">Password Changed Successfully</h2>
+            <p>Hello ${user.firstName},</p>
+            <p>Your PUZZLE account password has been changed.</p>
+            <p>If you did not make this change, please contact our support team immediately.</p>
+            <hr style="margin: 24px 0;">
+            <p style="color: #6b7280; font-size: 12px;">PUZZLE - Where Fashion Meets Mystery</p>
+          </div>
+        </body>
+        </html>
+      `,
+    });
+  } catch (emailError) {
+    console.error("Failed to send confirmation email:", emailError);
+    // Don't throw error, password was already updated
+  }
+
+  res.json({
+    success: true,
+    message: "Password updated successfully",
+  });
+});
 // @desc    Update password
 // @route   PUT /api/auth/password
 // @access  Private
@@ -700,4 +1248,10 @@ module.exports = {
   logout,
   googleAuth,
   googleCallback,
+  verifyEmail,
+  resendVerificationCode,
+  resendVerificationCodePublic,
+  verifyEmailPublic,
+  updatePasswordWithVerification,
+  sendPasswordChangeVerification,
 };
