@@ -1087,14 +1087,8 @@ const seedClaims = async (fragments) => {
   const claimedFragments = fragments.filter((f) => f.status === "claimed");
   const claims = [];
 
-  // Map of size abbreviations to schema enum values
-  const sizeMap = {
-    S: "small",
-    M: "medium",
-    L: "large",
-    XL: "large", // Map XL to large since XL isn't in enum
-    custom: "custom",
-  };
+  // Allowed sizes according to Claim schema
+  const allowedSizes = ["XS", "S", "M", "L", "XL", "XXL"];
 
   for (let i = 0; i < claimedFragments.length; i++) {
     const fragment = claimedFragments[i];
@@ -1128,9 +1122,9 @@ const seedClaims = async (fragments) => {
       };
     }
 
-    // Generate random size from allowed enum values
-    const sizes = ["small", "medium", "large", "custom"];
-    const randomSize = sizes[Math.floor(Math.random() * sizes.length)];
+    // Pick a random size from the Claim schema enum
+    const randomSize =
+      allowedSizes[Math.floor(Math.random() * allowedSizes.length)];
 
     claims.push({
       claimId: `CLM-${String(new Date().getFullYear()).slice(2)}${String(

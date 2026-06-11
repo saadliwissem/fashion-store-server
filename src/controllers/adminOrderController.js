@@ -572,7 +572,7 @@ const updateOrder = asyncHandler(async (req, res) => {
     order.items = items;
     const subtotal = items.reduce((sum, item) => sum + item.total, 0);
     order.subtotal = subtotal;
-    order.taxAmount = subtotal * 0.07;
+    order.taxAmount = subtotal * 0.19;
     order.total =
       subtotal +
       order.shippingPrice +

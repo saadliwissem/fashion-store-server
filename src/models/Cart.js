@@ -71,7 +71,7 @@ cartSchema.pre("save", function (next) {
   this.shipping = this.subtotal >= 99 ? 0 : 7;
 
   // Calculate tax (7% VAT)
-  this.tax = parseFloat((this.subtotal * 0.07).toFixed(3));
+  this.tax = parseFloat((this.subtotal * 0.19).toFixed(3));
 
   // Calculate total
   this.total = parseFloat(

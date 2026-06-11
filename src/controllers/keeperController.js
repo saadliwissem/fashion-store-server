@@ -6,8 +6,8 @@ const Fragment = require("../models/Fragment");
 const mongoose = require("mongoose");
 
 // @desc    Get keeper profile
-// @route   GET /api/keepers/profile/:userId?
-// @route   GET /api/keepers/profile/me (optional)
+// @route   GET /api/keepers/profile/:userId
+// @route   GET /api/keepers/profile/me
 // @access  Public/Private
 const getKeeperProfile = asyncHandler(async (req, res) => {
   let userId = req.params.userId;

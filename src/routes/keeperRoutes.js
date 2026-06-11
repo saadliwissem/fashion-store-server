@@ -16,7 +16,7 @@ const handleValidationErrors = require("../middleware/validationErrorHandler");
 router.get("/profile/me", protect, getKeeperProfile); // Get current user's profile
 
 router.get(
-  "/profile/:userId?",
+  "/profile/:userId",
   validateIdParam,
   handleValidationErrors,
   getKeeperProfile
