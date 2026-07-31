@@ -7,13 +7,14 @@ const {
   updateOrderStatus,
   updateOrder,
   deleteOrder,
-  bulkUpdateOrders,
   getOrderStats,
   updateTracking,
   updatePaymentStatus,
   getOrdersAnalytics,
   getSalesReport,
   exportOrders,
+  bulkDeleteOrders,
+  bulkUpdateOrders,
 } = require("../controllers/adminOrderController");
 const { protect, admin } = require("../middleware/authMiddleware");
 
@@ -26,12 +27,14 @@ router.get("/stats", getOrderStats);
 router.get("/analytics", getOrdersAnalytics);
 router.get("/sales-report", getSalesReport);
 router.get("/export", exportOrders);
+// routes/admin/orderRoutes.js
+router.put("/bulk", bulkUpdateOrders);
+router.delete("/bulk", bulkDeleteOrders);
 router.get("/:id", getOrder);
 router.put("/:id/status", updateOrderStatus);
 router.put("/:id/tracking", updateTracking);
 router.put("/:id/payment", updatePaymentStatus);
 router.put("/:id", updateOrder);
-router.put("/bulk", bulkUpdateOrders);
 router.delete("/:id", deleteOrder);
 
 module.exports = router;

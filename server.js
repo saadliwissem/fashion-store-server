@@ -13,6 +13,8 @@ dotenv.config();
 // Import database connection
 const connectDB = require("./src/config/db");
 
+const homeRoutes = require("./src/routes/homeRoutes");
+
 // Import existing e-commerce routes
 const authRoutes = require("./src/routes/authRoutes");
 const productRoutes = require("./src/routes/productRoutes");
@@ -105,12 +107,12 @@ app.use("/api/keepers", keeperRoutes);
 // ==================== ADMIN API ROUTES ====================
 
 // E-commerce Admin Routes
-app.use("/api/adminn", adminRoutes);
+app.use("/api/admin", adminRoutes);
 app.use("/api/admin/categories", adminCategoryRoutes);
 app.use("/api/admin/products", adminProductRoutes);
 app.use("/api/admin/inventory", adminInventoryRoutes);
 app.use("/api/admin/orders", adminOrderRoutes);
-
+app.use("/api/admin/home", homeRoutes);
 // Enigma Platform Admin Routes
 app.use("/api/admin/enigmas", adminEnigmaRoutes);
 app.use("/api/admin/chronicles", adminChronicleRoutes);

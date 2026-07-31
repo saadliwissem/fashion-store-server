@@ -4,6 +4,7 @@ const Order = require("../models/Order");
 const User = require("../models/User");
 const Product = require("../models/Product");
 const { sendEmail, emailTemplates } = require("../utils/sendEmail");
+const Inventory = require("../models/Inventory");
 
 // @desc    Get all orders with filters
 // @route   GET /api/admin/orders
@@ -596,26 +597,68 @@ const updateOrder = asyncHandler(async (req, res) => {
   });
 });
 
+// controllers/admin/orderController.js
+
 // @desc    Bulk update orders
 // @route   PUT /api/admin/orders/bulk
 // @access  Private/Admin
 const bulkUpdateOrders = asyncHandler(async (req, res) => {
   const { orderIds, updateData } = req.body;
 
-  if (!orderIds || !orderIds.length) {
-    res.status(400);
-    throw new Error("No orders selected");
+  if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Please provide an array of order IDs",
+    });
   }
 
   const result = await Order.updateMany(
     { _id: { $in: orderIds } },
-    { $set: updateData }
+    updateData,
+    { runValidators: true }
   );
 
   res.json({
     success: true,
-    message: `${result.modifiedCount} orders updated successfully`,
-    modifiedCount: result.modifiedCount,
+    data: {
+      matched: result.matchedCount,
+      modified: result.modifiedCount,
+    },
+  });
+});
+
+// @desc    Bulk delete orders
+// @route   DELETE /api/admin/orders/bulk
+// @access  Private/Admin
+const bulkDeleteOrders = asyncHandler(async (req, res) => {
+  const { orderIds } = req.body;
+
+  if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Please provide an array of order IDs",
+    });
+  }
+
+  // Only allow deletion of orders that are pending or cancelled
+  const result = await Order.deleteMany({
+    _id: { $in: orderIds },
+    status: { $in: ["pending", "cancelled"] },
+  });
+
+  if (result.deletedCount === 0) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "No orders were deleted. Only pending or cancelled orders can be deleted.",
+    });
+  }
+
+  res.json({
+    success: true,
+    data: {
+      deleted: result.deletedCount,
+    },
   });
 });
 
@@ -977,6 +1020,7 @@ module.exports = {
   updateOrder,
   deleteOrder,
   bulkUpdateOrders,
+  bulkDeleteOrders,
   getOrderStats,
   updateTracking,
   updatePaymentStatus,

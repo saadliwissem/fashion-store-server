@@ -3,6 +3,8 @@ const Product = require("../models/Product");
 const Category = require("../models/Category");
 const Review = require("../models/Review");
 const Inventory = require("../models/Inventory");
+const Order = require("../models/Order");
+const mongoose = require("mongoose");
 
 // @desc    Get all products
 // @route   GET /api/products
@@ -411,6 +413,85 @@ const getCategoryFilters = asyncHandler(async (req, res) => {
   });
 });
 
+// controllers/productController.js
+
+// @desc    Get frequently bought together products
+// @route   GET /api/products/frequently-bought-together
+// @access  Public
+const getFrequentlyBoughtTogether = asyncHandler(async (req, res) => {
+  const { productIds } = req.query; // Comma-separated list of product IDs in cart
+
+  if (!productIds) {
+    // If no products in cart, return popular products
+    const popularProducts = await Product.find({ isActive: true })
+      .sort({ purchaseCount: -1, createdAt: -1 })
+      .limit(8)
+      .populate("category", "name slug");
+
+    return res.json({
+      success: true,
+      data: popularProducts,
+      source: "popular",
+    });
+  }
+
+  const ids = productIds.split(",");
+
+  // Find orders that contain these products
+  const orders = await Order.aggregate([
+    {
+      $match: {
+        status: { $in: ["delivered", "shipped"] },
+        "items.product": {
+          $in: ids.map((id) => new mongoose.Types.ObjectId(id)),
+        },
+      },
+    },
+    { $unwind: "$items" },
+    {
+      $group: {
+        _id: "$items.product",
+        count: { $sum: 1 },
+      },
+    },
+    { $sort: { count: -1 } },
+    { $limit: 8 },
+  ]);
+
+  const frequentlyBoughtIds = orders.map((o) => o._id);
+
+  if (frequentlyBoughtIds.length === 0) {
+    // Fallback: get popular products
+    const popularProducts = await Product.find({ isActive: true })
+      .sort({ purchaseCount: -1, createdAt: -1 })
+      .limit(8)
+      .populate("category", "name slug");
+
+    return res.json({
+      success: true,
+      data: popularProducts,
+      source: "popular",
+    });
+  }
+
+  // Get product details
+  const products = await Product.find({
+    _id: { $in: frequentlyBoughtIds },
+    isActive: true,
+  }).populate("category", "name slug");
+
+  // Sort products by frequency
+  const sortedProducts = frequentlyBoughtIds
+    .map((id) => products.find((p) => p._id.toString() === id.toString()))
+    .filter(Boolean);
+
+  res.json({
+    success: true,
+    data: sortedProducts,
+    source: "frequently_bought",
+  });
+});
+
 module.exports = {
   getProducts,
   getProductById,
@@ -422,4 +503,5 @@ module.exports = {
   createProductReview,
   getCategoryFilters,
   getInventoryByProductId,
+  getFrequentlyBoughtTogether,
 };
